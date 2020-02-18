@@ -8,7 +8,11 @@ from tensorflow.keras.layers import Conv2D, MaxPooling2D
 from tensorflow.keras.constraints import max_norm
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.datasets import cifar10
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.initializers import he_uniform
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+from tensorflow.keras.optimizers import Adam
 
 def load_dataset():
     # load cifar10 data
@@ -42,30 +46,30 @@ def prep_pixels(trainx, testx, trainy, testy):
 def define_model(x_train, y_train, x_test, y_test):
     # define your model
     model = tf.keras.Sequential()
-    # first convolutional layer
-    model.add(Conv2D(32,(3,3), input_shape= x_train.shape[1:], padding='same'))
+    # first convolution layer
+    model.add(Conv2D(32, (3,3), input_shape= x_train.shape[1:], padding='same', kernel_initializer= he_uniform(), kernel_regularizer=l2(0.001)))
     model.add(Activation('relu'))
-    # we use batch normalizatin so that input that goes through is normalized
+    # we use batch normalization so that input that goes through is normalized
     model.add(BatchNormalization())
     # we add dropout as 0.2 so it will remove 20% of existing connections, this prevents overfitting
-    model.add(Conv2D(32,(3,3), input_shape= x_train.shape[1:], padding='same'))
+    model.add(Conv2D(32, (3,3), kernel_regularizer=l2(0.001) , kernel_initializer= he_uniform(), padding='same'))
     model.add(Activation('relu'))
     model.add(BatchNormalization())
     model.add(MaxPooling2D(pool_size=(2,2)))
     model.add(Dropout(0.2))
     # second conv layer with increased size so that model can learn more intricate features
-    model.add(Conv2D(64, (3,3), activation = 'relu', padding = 'same'))
+    model.add(Conv2D(64, (3,3), activation = 'relu', padding = 'same', kernel_initializer= he_uniform(), kernel_regularizer=l2(0.001)))
     # we add one pooling layer here
     model.add(BatchNormalization())
-    model.add(Conv2D(64, (3,3), activation = 'relu', padding = 'same'))
+    model.add(Conv2D(64, (3,3), activation = 'relu', padding = 'same', kernel_initializer= he_uniform(), kernel_regularizer=l2(0.001)))
     model.add(BatchNormalization())
     model.add(MaxPooling2D(pool_size=(2,2)))
     model.add(Dropout(0.3))
     # we can add as many conv layers as we want but have to make sure we increase their filter size
     # don't use too much pooling layer as it might deviate the model to make any sense of image
-    model.add(Conv2D(128, (3,3), activation='relu', padding='same'))
+    model.add(Conv2D(128, (3,3), activation='relu', padding='same', kernel_initializer= he_uniform(), kernel_regularizer=l2(0.001)))
     model.add(BatchNormalization())
-    model.add(Conv2D(128, (3,3), activation='relu', padding='same'))
+    model.add(Conv2D(128, (3,3), activation='relu', padding='same', kernel_initializer= he_uniform(), kernel_regularizer=l2(0.001)))
     model.add(BatchNormalization())
     model.add(MaxPooling2D(pool_size=(2,2)))
     model.add(Dropout(0.4))
@@ -81,7 +85,8 @@ def define_model(x_train, y_train, x_test, y_test):
     model.add(Dense(10))
     model.add(Activation('softmax'))
     # now we will compile the model
-    model.compile(loss= 'categorical_crossentropy', optimizer = 'adam', metrics=['accuracy'])
+    adam = Adam(learning_rate=0.001, beta_1=0.9, beta_2=0.999, amsgrad=False)
+    model.compile(loss= 'categorical_crossentropy', optimizer = adam, metrics=['accuracy'])
     print(model.summary())
     return model
 
@@ -103,7 +108,6 @@ def summary_plot(history):
 
 
 def train_model():
-    seed = 23
     # loading the dataset
     x_train, x_test, y_train, y_test = load_dataset()
     # displaying the data
@@ -113,24 +117,25 @@ def train_model():
     # creating model
     model = define_model(x_train, y_train, x_test, y_test)
 
-
-    '''''
     # Data generator basically generates copy of data hence increases the training data with slight random modifications
-    datagen = ImageDataGenerator(width_shift_range=0.1, height_shift_range=0.1, horizontal_flip=True)
+    datagenerator = ImageDataGenerator(width_shift_range=0.1, height_shift_range=0.1, horizontal_flip=True)
     # prepare iterator
-    it_train = datagen.flow(x_train, y_train, batch_size=64)
+    gen = datagenerator.flow(x_train, y_train, batch_size=64)
     steps = int(x_train.shape[0] / 64)
-    '''''
+
+    # create callbacks
+    es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=20)
+    mc = ModelCheckpoint('CIFAR10_best_model.h5', monitor='val_accuracy', mode='max', verbose=1, save_best_only=True)
 
     # fit model
-    history = model.fit(x_train, y_train, epochs=70, validation_data=(x_test, y_test), verbose=2)
+    history = model.fit_generator(gen, steps_per_epoch=steps, epochs=70, validation_data=(x_test, y_test), callbacks=[es, mc], verbose=2)
     # evaluate model
-    _, acc = model.evaluate(x_test, y_test, verbose=0)
+    _, acc = model.evaluate_generator(gen, steps=steps, callbacks=[es, mc], verbose=0)
     print('> %.3f' % (acc*100.0))
     # plotting summary of model and saving in file
     summary_plot(history)
     # saving this model
-    model.save('object_recognition_model.h5')
+    #model.save('object_recognition_model.h5')
 
 train_model()
 
